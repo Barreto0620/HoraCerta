@@ -10,48 +10,155 @@ import { ReportsView } from './components/Reports/ReportsView';
 import { User, TimeEntry } from './types';
 import { storage } from './utils/storage';
 import { useTheme } from './hooks/useTheme';
+import { supabase } from './lib/supabase';
 
 function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [activeView, setActiveView] = useState('dashboard');
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [loading, setLoading] = useState(true);
   const { isDark, toggleTheme } = useTheme();
 
   useEffect(() => {
-    const user = storage.getCurrentUser();
-    if (user) {
-      setCurrentUser(user);
-      loadTimeEntries(user.id);
-    }
+    let mounted = true;
+
+    // Função simples para verificar sessão e carregar dados
+    const checkSession = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (!mounted) return;
+
+        if (session?.user) {
+          // Criar/usar perfil local simples
+          const profile: User = {
+            id: session.user.id,
+            email: session.user.email || '',
+            name: session.user.email?.split('@')[0] || 'Usuário',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          };
+
+          setCurrentUser(profile);
+          
+          // Carregar registros de tempo
+          try {
+            const { data } = await storage.getUserTimeEntries(session.user.id);
+            if (mounted) {
+              setTimeEntries(data || []);
+            }
+          } catch (error) {
+            console.log('Erro ao carregar registros, usando array vazio');
+            if (mounted) {
+              setTimeEntries([]);
+            }
+          }
+        } else {
+          if (mounted) {
+            setCurrentUser(null);
+            setTimeEntries([]);
+          }
+        }
+      } catch (error) {
+        console.log('Erro na verificação de sessão');
+        if (mounted) {
+          setCurrentUser(null);
+          setTimeEntries([]);
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    // Listener simples para mudanças de auth
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (!mounted) return;
+
+        if (event === 'SIGNED_IN' && session?.user) {
+          const profile: User = {
+            id: session.user.id,
+            email: session.user.email || '',
+            name: session.user.email?.split('@')[0] || 'Usuário',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          };
+          
+          setCurrentUser(profile);
+          setLoading(false);
+          
+          // Carregar registros em background
+          storage.getUserTimeEntries(session.user.id).then(({ data }) => {
+            if (mounted) {
+              setTimeEntries(data || []);
+            }
+          }).catch(() => {
+            if (mounted) {
+              setTimeEntries([]);
+            }
+          });
+        } 
+        else if (event === 'SIGNED_OUT') {
+          setCurrentUser(null);
+          setTimeEntries([]);
+          setActiveView('dashboard');
+        }
+      }
+    );
+
+    // Verificar sessão inicial
+    checkSession();
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
-  const loadTimeEntries = (userId: string) => {
-    const entries = storage.getUserTimeEntries(userId);
-    setTimeEntries(entries);
-  };
-
-  const handleLogin = (user: User) => {
-    setCurrentUser(user);
-    storage.setCurrentUser(user);
-    loadTimeEntries(user.id);
-  };
-
-  const handleLogout = () => {
-    setCurrentUser(null);
-    storage.setCurrentUser(null);
-    setTimeEntries([]);
-    setActiveView('dashboard');
-  };
-
-  const handleEntryAdded = () => {
-    if (currentUser) {
-      loadTimeEntries(currentUser.id);
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.log('Erro no logout, forçando logout local');
+      setCurrentUser(null);
+      setTimeEntries([]);
     }
   };
 
+  const handleEntryAdded = async () => {
+    if (currentUser) {
+      try {
+        const { data } = await storage.getUserTimeEntries(currentUser.id);
+        setTimeEntries(data || []);
+      } catch (error) {
+        console.log('Erro ao recarregar registros');
+      }
+    }
+  };
+
+  // Loading simples
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-200 border-t-blue-600 mx-auto"></div>
+          <h2 className="mt-4 text-lg font-medium text-gray-900 dark:text-white">
+            CLT Time Tracker
+          </h2>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Carregando...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Se não tem usuário, mostrar login
   if (!currentUser) {
-    return <LoginForm onLogin={handleLogin} />;
+    return <LoginForm />;
   }
 
   const renderActiveView = () => {
@@ -70,9 +177,9 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 dark:from-gray-900 dark:to-gray-800 transition-colors duration-300">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 dark:from-gray-900 dark:to-gray-800">
       <div className="flex h-screen">
-        {/* Mobile Menu Button */}
+        {/* Mobile menu button */}
         <button
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
           className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-lg bg-white dark:bg-gray-800 shadow-lg"
@@ -85,7 +192,7 @@ function App() {
         </button>
 
         {/* Sidebar */}
-        <div className={`${sidebarCollapsed ? 'hidden lg:block' : 'block'} lg:block transition-all duration-300`}>
+        <div className={`${sidebarCollapsed ? 'hidden lg:block' : 'block'} lg:block`}>
           <Sidebar
             activeView={activeView}
             onViewChange={setActiveView}
@@ -93,7 +200,7 @@ function App() {
           />
         </div>
 
-        {/* Main Content */}
+        {/* Main content */}
         <div className="flex-1 flex flex-col overflow-hidden">
           <Header
             user={currentUser}
@@ -101,7 +208,7 @@ function App() {
             toggleTheme={toggleTheme}
             onLogout={handleLogout}
           />
-          
+
           <main className="flex-1 overflow-y-auto p-6">
             <div className="max-w-7xl mx-auto">
               {renderActiveView()}
@@ -110,7 +217,7 @@ function App() {
         </div>
       </div>
 
-      {/* Mobile Overlay */}
+      {/* Mobile overlay */}
       {!sidebarCollapsed && (
         <div
           className="lg:hidden fixed inset-0 bg-black bg-opacity-50 z-40"

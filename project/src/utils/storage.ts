@@ -1,76 +1,136 @@
+import { supabase } from '../lib/supabase';
 import { User, TimeEntry } from '../types';
 
-const STORAGE_KEYS = {
-  USERS: 'clt_tracking_users',
-  TIME_ENTRIES: 'clt_tracking_entries',
-  CURRENT_USER: 'clt_tracking_current_user',
-  THEME: 'clt_tracking_theme'
-};
-
 export const storage = {
-  // Users
-  getUsers(): User[] {
-    const users = localStorage.getItem(STORAGE_KEYS.USERS);
-    return users ? JSON.parse(users) : [];
-  },
+  // ===================
+  // REGISTROS DE TEMPO
+  // ===================
 
-  saveUser(user: User): void {
-    const users = this.getUsers();
-    const existingIndex = users.findIndex(u => u.id === user.id);
-    
-    if (existingIndex >= 0) {
-      users[existingIndex] = user;
-    } else {
-      users.push(user);
-    }
-    
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
-  },
+  async getTimeEntries(): Promise<TimeEntry[]> {
+    try {
+      const { data, error } = await supabase
+        .from('time_entries')
+        .select('*')
+        .order('date', { ascending: false });
 
-  // Time Entries
-  getTimeEntries(): TimeEntry[] {
-    const entries = localStorage.getItem(STORAGE_KEYS.TIME_ENTRIES);
-    return entries ? JSON.parse(entries) : [];
-  },
+      if (error) throw error;
 
-  saveTimeEntry(entry: TimeEntry): void {
-    const entries = this.getTimeEntries();
-    const existingIndex = entries.findIndex(e => e.id === entry.id);
-    
-    if (existingIndex >= 0) {
-      entries[existingIndex] = entry;
-    } else {
-      entries.push(entry);
-    }
-    
-    localStorage.setItem(STORAGE_KEYS.TIME_ENTRIES, JSON.stringify(entries));
-  },
-
-  getUserTimeEntries(userId: string): TimeEntry[] {
-    return this.getTimeEntries().filter(entry => entry.userId === userId);
-  },
-
-  // Current User
-  getCurrentUser(): User | null {
-    const user = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
-    return user ? JSON.parse(user) : null;
-  },
-
-  setCurrentUser(user: User | null): void {
-    if (user) {
-      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
-    } else {
-      localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+      return data || [];
+    } catch (error) {
+      console.error('Erro ao buscar registros:', error);
+      return [];
     }
   },
 
-  // Theme
+  async saveTimeEntry(entry: TimeEntry) {
+    try {
+      const { data, error } = await supabase
+        .from('time_entries')
+        .insert({
+          id: entry.id,
+          user_id: entry.userId,
+          date: entry.date,
+          start_time: entry.startTime,
+          minutes: entry.minutes,
+          ticket_id: entry.ticketId,
+          description: entry.description,
+          created_at: entry.createdAt
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      return { data, error: null };
+    } catch (error: any) {
+      console.error('Erro ao salvar registro:', error);
+      return { data: null, error };
+    }
+  },
+
+  async getUserTimeEntries(userId: string) {
+    try {
+      const { data, error } = await supabase
+        .from('time_entries')
+        .select('*')
+        .eq('user_id', userId)
+        .order('date', { ascending: false });
+
+      if (error) throw error;
+
+      // Converter para o formato esperado pela aplicação
+      const entries: TimeEntry[] = (data || []).map(entry => ({
+        id: entry.id,
+        userId: entry.user_id,
+        date: entry.date,
+        startTime: entry.start_time,
+        minutes: entry.minutes,
+        ticketId: entry.ticket_id,
+        description: entry.description,
+        createdAt: entry.created_at
+      }));
+
+      return { data: entries, error: null };
+    } catch (error: any) {
+      console.error('Erro ao buscar registros do usuário:', error);
+      return { data: [], error };
+    }
+  },
+
+  async updateTimeEntry(id: string, updates: Partial<TimeEntry>) {
+    try {
+      const updateData: any = {};
+
+      if (updates.date) updateData.date = updates.date;
+      if (updates.startTime) updateData.start_time = updates.startTime;
+      if (updates.minutes) updateData.minutes = updates.minutes;
+      if (updates.ticketId !== undefined) updateData.ticket_id = updates.ticketId;
+      if (updates.description !== undefined) updateData.description = updates.description;
+
+      updateData.updated_at = new Date().toISOString();
+
+      const { data, error } = await supabase
+        .from('time_entries')
+        .update(updateData)
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      return { data, error: null };
+    } catch (error: any) {
+      console.error('Erro ao atualizar registro:', error);
+      return { data: null, error };
+    }
+  },
+
+  async deleteTimeEntry(id: string) {
+    try {
+      const { error } = await supabase
+        .from('time_entries')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+
+      return { error: null };
+    } catch (error: any) {
+      console.error('Erro ao deletar registro:', error);
+      return { error };
+    }
+  },
+
+  // ===================
+  // PREFERÊNCIAS (manter no localStorage)
+  // ===================
+
   getTheme(): boolean {
-    const theme = localStorage.getItem(STORAGE_KEYS.THEME);
+    const theme = localStorage.getItem('clt_tracking_theme');
     return theme ? JSON.parse(theme) : false;
   },
 
   setTheme(isDark: boolean): void {
-    localStorage.setItem(STORAGE_KEYS.THEME, JSON.stringify(isDark));
-  }
+    localStorage.setItem('clt_tracking_theme', JSON.stringify(isDark));
+  },
 };

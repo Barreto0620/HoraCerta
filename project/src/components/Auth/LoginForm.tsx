@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Clock, User, Building2 } from 'lucide-react';
+import { Clock, User, Building2, Mail } from 'lucide-react'; // Adicionado o ícone Mail para o campo de e-mail
 import { User as UserType } from '../../types';
+import { supabase } from '../../lib/supabase'; // Importação do Supabase
 import { storage } from '../../utils/storage';
 
 interface LoginFormProps {
@@ -11,34 +12,50 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLogin }) => {
   const [formData, setFormData] = useState({
     name: '',
     email: '',
-    department: ''
+    department: '',
+    password: ''
   });
   const [isLogin, setIsLogin] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+    setErrorMessage('');
+    setSuccessMessage('');
+
     if (isLogin) {
-      // Login logic
-      const users = storage.getUsers();
-      const user = users.find(u => u.email === formData.email);
-      if (user) {
-        onLogin(user);
-      } else {
-        alert('Usuário não encontrado. Por favor, registre-se primeiro.');
+      // Lógica de Login com Supabase
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: formData.email,
+        password: formData.password,
+      });
+
+      if (error) {
+        setErrorMessage(error.message);
+      } else if (data.user) {
+        // A lógica de busca de perfil foi movida para o App.tsx.
+        // O onLogin é chamado para notificar o App.
+        setSuccessMessage('Login bem-sucedido! Redirecionando...');
       }
     } else {
-      // Register logic
-      const newUser: UserType = {
-        id: crypto.randomUUID(),
-        name: formData.name,
+      // Lógica de Registro com Supabase
+      const { data, error } = await supabase.auth.signUp({
         email: formData.email,
-        department: formData.department,
-        createdAt: new Date().toISOString()
-      };
-      
-      storage.saveUser(newUser);
-      onLogin(newUser);
+        password: formData.password,
+        options: {
+          data: {
+            name: formData.name,
+            department: formData.department
+          }
+        }
+      });
+
+      if (error) {
+        setErrorMessage(error.message);
+      } else if (data.user) {
+        setSuccessMessage('Confirmação de e-mail enviada! Verifique sua caixa de entrada.');
+      }
     }
   };
 
@@ -69,7 +86,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLogin }) => {
         <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-md rounded-xl shadow-xl p-6">
           <div className="flex rounded-lg bg-gray-100 dark:bg-gray-700 p-1 mb-6">
             <button
-              onClick={() => setIsLogin(true)}
+              onClick={() => { setIsLogin(true); setErrorMessage(''); setSuccessMessage(''); }}
               className={`flex-1 text-center py-2 px-4 rounded-md transition-all duration-200 ${
                 isLogin
                   ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
@@ -79,7 +96,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLogin }) => {
               Login
             </button>
             <button
-              onClick={() => setIsLogin(false)}
+              onClick={() => { setIsLogin(false); setErrorMessage(''); setSuccessMessage(''); }}
               className={`flex-1 text-center py-2 px-4 rounded-md transition-all duration-200 ${
                 !isLogin
                   ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
@@ -114,10 +131,27 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLogin }) => {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Email
               </label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                <input
+                  type="email"
+                  name="email"
+                  value={formData.email}
+                  onChange={handleInputChange}
+                  className="w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
+                  required
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Senha
+              </label>
               <input
-                type="email"
-                name="email"
-                value={formData.email}
+                type="password"
+                name="password"
+                value={formData.password}
                 onChange={handleInputChange}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
                 required
@@ -149,6 +183,14 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLogin }) => {
                   </select>
                 </div>
               </div>
+            )}
+            
+            {errorMessage && (
+              <p className="text-red-500 text-sm text-center font-medium mt-4">{errorMessage}</p>
+            )}
+
+            {successMessage && (
+              <p className="text-green-500 text-sm text-center font-medium mt-4">{successMessage}</p>
             )}
 
             <button
